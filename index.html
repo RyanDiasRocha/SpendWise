@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SpendWise - Gerenciador de Despesas</title>
+    <!-- Google Fonts - Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- ExcelJS CDN para planilhas estilizadas de alta fidelidade -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Login Gate Screen (Visible when not logged in) -->
+    <div class="login-overlay" id="login-screen" style="display: flex;">
+        <div class="login-card glass-card">
+            <div class="login-logo">
+                <div class="logo-icon large">
+                    <i data-lucide="wallet-cards"></i>
+                </div>
+                <h2>SpendWise</h2>
+                <p>Controle Inteligente de Despesas por Período</p>
+            </div>
+            
+            <div class="login-message">
+                <p>Faça login com sua conta Google para começar. Suas despesas serão salvas e sincronizadas de forma automática e segura no seu próprio Google Drive.</p>
+            </div>
+
+            <button class="btn btn-primary btn-full btn-lg" id="btn-login-google">
+                <i data-lucide="log-in"></i>
+                <span>Entrar com o Google</span>
+            </button>
+
+            <div class="login-loader" id="login-loader" style="display: none;">
+                <div class="spinner"></div>
+                <p id="loader-text">Autenticando...</p>
+            </div>
+
+            <div class="login-footer">
+                <p>SpendWise utiliza o Google Drive (permissão restrita drive.file) para manter seus dados privados e criptografados.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App Container (Hidden by default, shown after login) -->
+    <div class="app-container" id="app-container" style="display: none;">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-area">
+                <div class="logo-icon">
+                    <i data-lucide="wallet-cards"></i>
+                </div>
+                <div class="logo-text">
+                    <h1>SpendWise</h1>
+                    <p>Controle Inteligente de Despesas por Período</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-primary" id="btn-new-expense">
+                    <i data-lucide="plus-circle"></i>
+                    <span>Nova Despesa</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Dashboard Cards -->
+        <section class="dashboard-metrics">
+            <div class="metric-card card-total">
+                <div class="card-icon">
+                    <i data-lucide="dollar-sign"></i>
+                </div>
+                <div class="card-info">
+                    <span class="card-label">Total Despesas</span>
+                    <h2 class="card-value" id="val-total">R$ 0,00</h2>
+                </div>
+            </div>
+
+            <div class="metric-card card-reserved">
+                <div class="card-icon">
+                    <i data-lucide="shield-check"></i>
+                </div>
+                <div class="card-info">
+                    <span class="card-label">Valor Reservado</span>
+                    <h2 class="card-value text-emerald" id="val-reserved">R$ 0,00</h2>
+                </div>
+            </div>
+
+            <div class="metric-card card-pending">
+                <div class="card-icon">
+                    <i data-lucide="clock"></i>
+                </div>
+                <div class="card-info">
+                    <span class="card-label">A Reservar</span>
+                    <h2 class="card-value text-coral" id="val-pending">R$ 0,00</h2>
+                </div>
+            </div>
+
+            <div class="metric-card card-progress">
+                <div class="card-info-progress">
+                    <div class="progress-header">
+                        <span class="card-label">Progresso de Cobertura</span>
+                        <span class="progress-percentage" id="val-progress-pct">0%</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar-fill" id="val-progress-bar" style="width: 0%"></div>
+                    </div>
+                    <span class="progress-subtext" id="val-progress-subtext">Nenhuma despesa reservada ainda.</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Workspace Area -->
+        <main class="app-content">
+            <!-- Sidebar for Filters, Periods, Cloud and Charts -->
+            <aside class="sidebar-section">
+                <!-- Period Management Card -->
+                <div class="glass-card period-card">
+                    <h3 class="section-title"><i data-lucide="calendar-range"></i> Período de Trabalho</h3>
+                    
+                    <div class="filter-group">
+                        <label for="filter-period">Período Ativo</label>
+                        <div class="period-selector-row">
+                            <select id="filter-period">
+                                <!-- Dynamic Options -->
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="period-actions">
+                        <button class="btn btn-secondary btn-icon-only" id="btn-new-period" title="Novo Período">
+                            <i data-lucide="plus"></i> Novo
+                        </button>
+                        <button class="btn btn-secondary btn-icon-only text-coral" id="btn-delete-period" title="Excluir Período Atual">
+                            <i data-lucide="trash-2"></i> Excluir
+                        </button>
+                    </div>
+
+                    <button class="btn btn-success btn-full margin-top-sm" id="btn-export-excel">
+                        <i data-lucide="file-spreadsheet"></i>
+                        <span>Exportar Período para Excel</span>
+                    </button>
+                </div>
+
+                <!-- Google Drive Sync Status Card -->
+                <div class="glass-card cloud-card">
+                    <h3 class="section-title"><i data-lucide="cloud"></i> Sincronização na Nuvem</h3>
+
+                    <div class="cloud-status-area">
+                        <div class="status-indicator" style="justify-content: space-between; width: 100%;">
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span class="status-dot disconnected" id="cloud-status-dot"></span>
+                                <span class="status-text" id="cloud-status-text">Verificando...</span>
+                            </div>
+                            <span class="cloud-sync-spinner" id="cloud-sync-spinner" style="display: none;">
+                                <i data-lucide="refresh-cw" class="spin-icon"></i>
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="cloud-actions margin-top-sm" id="cloud-actions-container" style="margin-top: 15px;">
+                        <button class="btn btn-text text-coral btn-full" id="btn-disconnect-google" style="justify-content: center; background: rgba(244, 63, 94, 0.04); padding: 0.6rem;">
+                            <i data-lucide="log-out"></i> Sair da Conta
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Filters Card -->
+                <div class="glass-card filters-card">
+                    <h3 class="section-title"><i data-lucide="sliders-horizontal"></i> Filtros do Período</h3>
+                    
+                    <div class="filter-group">
+                        <label for="filter-search">Buscar Descrição</label>
+                        <div class="input-with-icon">
+                            <i data-lucide="search" class="input-icon"></i>
+                            <input type="text" id="filter-search" placeholder="Ex: Mercado, Aluguel...">
+                        </div>
+                    </div>
+
+                    <div class="filter-group">
+                        <label for="filter-payment">Forma de Pagamento</label>
+                        <div class="payment-filter-row">
+                            <select id="filter-payment">
+                                <!-- Dynamic Options -->
+                            </select>
+                            <button class="btn btn-secondary btn-square" id="btn-manage-payments" title="Gerenciar Formas de Pagamento">
+                                <i data-lucide="cog"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="filter-group">
+                        <label for="filter-status">Status de Reserva</label>
+                        <select id="filter-status">
+                            <option value="all">Todos os status</option>
+                            <option value="reservado">Reservado</option>
+                            <option value="pendente">Não Reservado</option>
+                        </select>
+                    </div>
+
+                    <button class="btn btn-secondary btn-full" id="btn-clear-filters">
+                        <i data-lucide="rotate-ccw"></i>
+                        <span>Limpar Filtros</span>
+                    </button>
+                </div>
+
+                <!-- Charts Card -->
+                <div class="glass-card charts-card">
+                    <h3 class="section-title"><i data-lucide="pie-chart"></i> Estatísticas</h3>
+                    <div class="chart-container">
+                        <canvas id="payment-chart"></canvas>
+                    </div>
+                    <div class="chart-container margin-top-lg">
+                        <canvas id="status-chart"></canvas>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main Content Area: Expenses List -->
+            <section class="list-section">
+                <div class="list-header">
+                    <div class="list-title-area">
+                        <h3 class="section-title"><i data-lucide="receipt"></i> Lista de Despesas</h3>
+                        <span class="badge" id="expense-count">0 despesas</span>
+                    </div>
+                    <div class="list-sort">
+                        <label for="sort-expenses">Ordenar por:</label>
+                        <select id="sort-expenses">
+                            <option value="date-desc">Mais Recentes</option>
+                            <option value="date-asc">Mais Antigas</option>
+                            <option value="value-desc">Maior Valor</option>
+                            <option value="value-asc">Menor Valor</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="expenses-list" id="expenses-list">
+                    <!-- Dynamic Items will be rendered here -->
+                </div>
+                
+                <div class="empty-state" id="empty-state" style="display: none;">
+                    <i data-lucide="check-circle-2" class="empty-icon text-emerald"></i>
+                    <h4>Nenhuma despesa neste período</h4>
+                    <p>Adicione novas despesas ou limpe os filtros para ver seus lançamentos.</p>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer Actions -->
+        <footer class="app-footer" style="justify-content: center;">
+            <p>SpendWise &copy; 2026. Design Premium e Sincronização em Tempo Real na Nuvem.</p>
+        </footer>
+    </div>
+
+    <!-- Modal Form (New/Edit Expense) -->
+    <div class="modal-overlay" id="expense-modal">
+        <div class="modal-content glass-card">
+            <div class="modal-header">
+                <h3 id="modal-title">Nova Despesa</h3>
+                <button class="btn-close" id="btn-close-modal">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <form id="expense-form">
+                <input type="hidden" id="expense-id">
+                
+                <div class="form-group">
+                    <label for="expense-desc">Descrição</label>
+                    <input type="text" id="expense-desc" required placeholder="Ex: Supermercado, Aluguel do mês...">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group col-6">
+                        <label for="expense-val">Valor (R$)</label>
+                        <input type="number" id="expense-val" step="0.01" required min="0.01" placeholder="0,00">
+                    </div>
+                    <div class="form-group col-6">
+                        <label for="expense-date">Data</label>
+                        <input type="date" id="expense-date" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="expense-payment">Forma de Pagamento</label>
+                    <select id="expense-payment" required>
+                        <!-- Dynamic Options -->
+                    </select>
+                </div>
+
+                <div class="form-group toggle-group" id="reserved-toggle-group">
+                    <label class="toggle-container">
+                        <input type="checkbox" id="expense-reserved">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">Esta despesa já está reservada para pagamento</span>
+                    </label>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="btn-cancel-modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Salvar Lançamento</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Form (New Period) -->
+    <div class="modal-overlay" id="period-modal">
+        <div class="modal-content glass-card">
+            <div class="modal-header">
+                <h3>Criar Novo Período</h3>
+                <button class="btn-close" id="btn-close-period-modal">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <form id="period-form">
+                <div class="form-group">
+                    <label for="period-name">Nome do Período</label>
+                    <input type="text" id="period-name" required placeholder="Ex: Junho 2026, Viagem para SP, Período Extra...">
+                    <small style="color: var(--text-muted); display: block; margin-top: 0.5rem;">
+                        Ao criar, este período será definido como ativo e você começará com uma lista limpa.
+                    </small>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="btn-cancel-period-modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Criar e Ativar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Form (Manage Payment Methods) -->
+    <div class="modal-overlay" id="payment-methods-modal">
+        <div class="modal-content glass-card">
+            <div class="modal-header">
+                <h3>Gerenciar Formas de Pagamento</h3>
+                <button class="btn-close" id="btn-close-payment-modal">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            
+            <div class="payment-methods-list-container">
+                <ul class="payment-methods-list" id="payment-methods-list">
+                    <!-- Dynamic List of Payment Methods -->
+                </ul>
+            </div>
+
+            <form id="add-payment-form" class="margin-top-sm">
+                <div class="form-group">
+                    <label for="new-payment-name">Nova Forma de Pagamento</label>
+                    <div class="input-action-row">
+                        <input type="text" id="new-payment-name" required placeholder="Ex: Nubank, Vale Refeição...">
+                        <button type="submit" class="btn btn-primary">Adicionar</button>
+                    </div>
+                </div>
+            </form>
+
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="btn-close-payment-mgr">Fechar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Google Identity API client and GAPI loading -->
+    <!-- GIS script -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <!-- GAPI script -->
+    <script src="https://apis.google.com/js/api.js" async defer></script>
+
+    <!-- Notification Toast -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
