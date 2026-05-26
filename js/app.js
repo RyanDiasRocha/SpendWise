@@ -1136,6 +1136,8 @@ async function exportPeriodToExcel() {
 let tokenClient = null;
 let driveAccessToken = null;
 let googleUserEmail = "";
+let googleUserName = "";
+let googleUserPhoto = "";
 
 const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
 const SCOPES = 'https://www.googleapis.com/auth/drive.file';
@@ -1272,9 +1274,39 @@ async function fetchUserProfile() {
         });
         const user = resp.result.user;
         googleUserEmail = user.emailAddress || "Usuário Google";
+        googleUserName = user.displayName || "";
+        googleUserPhoto = user.photoLink || "";
+        
+        localStorage.setItem('spendwise_user_email', googleUserEmail);
+        localStorage.setItem('spendwise_user_name', googleUserName);
+        localStorage.setItem('spendwise_user_photo', googleUserPhoto);
     } catch (e) {
-        console.warn("Não foi possível obter e-mail do perfil.", e);
+        console.warn("Não foi possível obter dados do perfil.", e);
         googleUserEmail = "Conectado";
+    }
+}
+
+function updateProfileUI() {
+    const profileContainer = document.getElementById('user-profile-container');
+    const profileAvatar = document.getElementById('profile-avatar');
+    const profileName = document.getElementById('profile-name');
+    const profileEmail = document.getElementById('profile-email');
+
+    const email = localStorage.getItem('spendwise_user_email') || googleUserEmail;
+    const name = localStorage.getItem('spendwise_user_name') || googleUserName;
+    const photo = localStorage.getItem('spendwise_user_photo') || googleUserPhoto;
+
+    if (profileContainer) {
+        if (driveAccessToken && email) {
+            profileContainer.style.display = 'flex';
+            if (profileAvatar) {
+                profileAvatar.src = photo || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y';
+            }
+            if (profileName) profileName.textContent = name || 'Usuário Google';
+            if (profileEmail) profileEmail.textContent = email;
+        } else {
+            profileContainer.style.display = 'none';
+        }
     }
 }
 
@@ -1287,6 +1319,7 @@ function updateCloudUI() {
         if (statusDot) statusDot.className = 'status-dot disconnected';
         if (statusText) statusText.textContent = 'Sem Client ID';
         if (actionsContainer) actionsContainer.style.display = 'none';
+        updateProfileUI();
         return;
     }
 
@@ -1299,6 +1332,7 @@ function updateCloudUI() {
         if (statusText) statusText.textContent = 'Desconectado';
         if (actionsContainer) actionsContainer.style.display = 'none';
     }
+    updateProfileUI();
 }
 
 // Save/update Client ID in settings
@@ -1346,7 +1380,12 @@ function disconnectGoogleDrive() {
     // Always clear local session details to update UI immediately
     driveAccessToken = null;
     googleUserEmail = "";
+    googleUserName = "";
+    googleUserPhoto = "";
     localStorage.removeItem('spendwise_gdrive_token');
+    localStorage.removeItem('spendwise_user_email');
+    localStorage.removeItem('spendwise_user_name');
+    localStorage.removeItem('spendwise_user_photo');
     
     // Clear local state to prevent data remaining visible
     state.periods = [];
