@@ -1195,10 +1195,15 @@ async function initGapi() {
                 showApp();
             } catch (err) {
                 console.warn("Token do Google Drive inválido ou expirado.", err);
-                disconnectGoogleDrive();
+                handleTokenExpiration();
             }
         } else {
-            showLoginGate(false);
+            const email = localStorage.getItem('spendwise_user_email');
+            if (email) {
+                showApp();
+            } else {
+                showLoginGate(false);
+            }
         }
     } catch (e) {
         console.error("Erro ao inicializar GAPI client", e);
@@ -1239,7 +1244,12 @@ function initGis() {
                     showApp();
                 } catch (err) {
                     console.error("Erro após autenticação:", err);
-                    disconnectGoogleDrive();
+                    const email = localStorage.getItem('spendwise_user_email');
+                    if (email) {
+                        handleTokenExpiration();
+                    } else {
+                        disconnectGoogleDrive();
+                    }
                 }
             },
         });
@@ -1292,19 +1302,28 @@ function updateProfileUI() {
     const popoverAvatar = document.getElementById('popover-avatar');
     const popoverName = document.getElementById('popover-name');
     const popoverEmail = document.getElementById('popover-email');
+    const reconnectBtn = document.getElementById('btn-reconnect-google');
 
     const email = localStorage.getItem('spendwise_user_email') || googleUserEmail;
     const name = localStorage.getItem('spendwise_user_name') || googleUserName;
     const photo = localStorage.getItem('spendwise_user_photo') || googleUserPhoto;
 
     if (dropdownContainer) {
-        if (driveAccessToken && email) {
+        if (email) {
             dropdownContainer.style.display = 'inline-block';
             const avatarUrl = photo || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y';
             if (triggerAvatar) triggerAvatar.src = avatarUrl;
             if (popoverAvatar) popoverAvatar.src = avatarUrl;
             if (popoverName) popoverName.textContent = name || 'Usuário Google';
             if (popoverEmail) popoverEmail.textContent = email;
+            
+            if (reconnectBtn) {
+                if (!driveAccessToken) {
+                    reconnectBtn.style.display = 'block';
+                } else {
+                    reconnectBtn.style.display = 'none';
+                }
+            }
         } else {
             dropdownContainer.style.display = 'none';
             const card = document.getElementById('profile-popover-card');
@@ -1385,6 +1404,17 @@ function connectGoogleDrive() {
         return;
     }
     tokenClient.requestAccessToken({ prompt: 'consent' });
+}
+
+// Handle token expiration without logging out the user
+function handleTokenExpiration() {
+    console.warn("Token do Google Drive expirado ou inválido.");
+    driveAccessToken = null;
+    localStorage.removeItem('spendwise_gdrive_token');
+    
+    updateCloudUI();
+    showToast("Sessão do Google Drive expirada. Reconecte no menu de perfil para sincronizar na nuvem.", "warning");
+    showApp();
 }
 
 // Disconnect session
@@ -1512,8 +1542,7 @@ async function uploadToDrive(isSilent = false) {
     } catch (e) {
         console.error("Erro no envio para o Drive", e);
         if (e.status === 401) {
-            showToast("Sessão Google expirada. Por favor, conecte novamente.", "error");
-            disconnectGoogleDrive();
+            handleTokenExpiration();
         } else {
             if (!isSilent) {
                 showToast("Erro ao enviar dados para o Google Drive.", "error");
@@ -1580,8 +1609,7 @@ async function downloadFromDrive() {
     } catch (e) {
         console.error("Erro ao baixar do Drive", e);
         if (e.status === 401) {
-            showToast("Sessão Google expirada. Por favor, conecte novamente.", "error");
-            disconnectGoogleDrive();
+            handleTokenExpiration();
         } else {
             showToast("Erro ao carregar dados do Google Drive.", "error");
         }
@@ -1679,8 +1707,11 @@ function handleFileInputChange(e) {
 document.addEventListener("DOMContentLoaded", () => {
     // 1. Initial State Load & Login Gate Check
     const cachedToken = localStorage.getItem('spendwise_gdrive_token');
+    const email = localStorage.getItem('spendwise_user_email');
     if (cachedToken) {
         showLoginGate(true, "Carregando dados da nuvem...");
+    } else if (email) {
+        showApp();
     } else {
         showLoginGate(false);
     }
@@ -1736,6 +1767,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // 4.7 Google Drive Sync Listeners
     const btnLoginGoogle = document.getElementById('btn-login-google');
     if (btnLoginGoogle) btnLoginGoogle.addEventListener('click', connectGoogleDrive);
+    
+    const btnReconnectGoogle = document.getElementById('btn-reconnect-google');
+    if (btnReconnectGoogle) btnReconnectGoogle.addEventListener('click', connectGoogleDrive);
     
     const btnDisconnectGoogle = document.getElementById('btn-disconnect-google');
     if (btnDisconnectGoogle) btnDisconnectGoogle.addEventListener('click', disconnectGoogleDrive);
