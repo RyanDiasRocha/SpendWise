@@ -1440,8 +1440,8 @@ select option {
     top: calc(100% + 12px);
     right: 0;
     width: 280px;
-    background: var(--bg-card);
-    backdrop-filter: var(--blur-glass);
+    background: rgba(15, 23, 42, 0.97);
+    backdrop-filter: blur(20px);
     border: 1px solid var(--border-color);
     border-radius: 16px;
     box-shadow: var(--shadow-premium);
