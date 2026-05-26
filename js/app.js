@@ -1287,28 +1287,50 @@ async function fetchUserProfile() {
 }
 
 function updateProfileUI() {
-    const profileContainer = document.getElementById('user-profile-container');
-    const profileAvatar = document.getElementById('profile-avatar');
-    const profileName = document.getElementById('profile-name');
-    const profileEmail = document.getElementById('profile-email');
+    const dropdownContainer = document.getElementById('profile-dropdown-container');
+    const triggerAvatar = document.getElementById('profile-trigger-avatar');
+    const popoverAvatar = document.getElementById('popover-avatar');
+    const popoverName = document.getElementById('popover-name');
+    const popoverEmail = document.getElementById('popover-email');
 
     const email = localStorage.getItem('spendwise_user_email') || googleUserEmail;
     const name = localStorage.getItem('spendwise_user_name') || googleUserName;
     const photo = localStorage.getItem('spendwise_user_photo') || googleUserPhoto;
 
-    if (profileContainer) {
+    if (dropdownContainer) {
         if (driveAccessToken && email) {
-            profileContainer.style.display = 'flex';
-            if (profileAvatar) {
-                profileAvatar.src = photo || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y';
-            }
-            if (profileName) profileName.textContent = name || 'Usuário Google';
-            if (profileEmail) profileEmail.textContent = email;
+            dropdownContainer.style.display = 'inline-block';
+            const avatarUrl = photo || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y';
+            if (triggerAvatar) triggerAvatar.src = avatarUrl;
+            if (popoverAvatar) popoverAvatar.src = avatarUrl;
+            if (popoverName) popoverName.textContent = name || 'Usuário Google';
+            if (popoverEmail) popoverEmail.textContent = email;
         } else {
-            profileContainer.style.display = 'none';
+            dropdownContainer.style.display = 'none';
+            const card = document.getElementById('profile-popover-card');
+            if (card) card.classList.remove('active');
         }
     }
 }
+
+function toggleProfileDropdown(e) {
+    e.stopPropagation();
+    const card = document.getElementById('profile-popover-card');
+    if (card) {
+        card.classList.toggle('active');
+    }
+}
+
+// Close profile dropdown when clicking outside
+document.addEventListener('click', (e) => {
+    const card = document.getElementById('profile-popover-card');
+    const trigger = document.getElementById('profile-trigger-btn');
+    if (card && card.classList.contains('active')) {
+        if (!card.contains(e.target) && e.target !== trigger && !trigger.contains(e.target)) {
+            card.classList.remove('active');
+        }
+    }
+});
 
 function updateCloudUI() {
     const statusDot = document.getElementById('cloud-status-dot');
@@ -1717,6 +1739,9 @@ document.addEventListener("DOMContentLoaded", () => {
     
     const btnDisconnectGoogle = document.getElementById('btn-disconnect-google');
     if (btnDisconnectGoogle) btnDisconnectGoogle.addEventListener('click', disconnectGoogleDrive);
+
+    const profileTriggerBtn = document.getElementById('profile-trigger-btn');
+    if (profileTriggerBtn) profileTriggerBtn.addEventListener('click', toggleProfileDropdown);
 
     // 5. Search Filters Listeners
     document.getElementById('filter-search').addEventListener('input', renderList);

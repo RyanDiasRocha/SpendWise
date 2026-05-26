@@ -65,19 +65,28 @@
                     <span>Nova Despesa</span>
                 </button>
 
-                <!-- Container do Perfil e Sair da Conta -->
-                <div class="user-profile-container" id="user-profile-container" style="display: none;">
-                    <div class="user-profile-badge">
-                        <img src="" alt="Foto de Perfil" class="profile-avatar" id="profile-avatar">
-                        <div class="profile-info">
-                            <span class="profile-name" id="profile-name">Carregando...</span>
-                            <span class="profile-email" id="profile-email"></span>
-                        </div>
-                    </div>
-                    <button class="btn btn-secondary text-coral" id="btn-disconnect-google" title="Sair da Conta">
-                        <i data-lucide="log-out"></i>
-                        <span class="btn-text-responsive">Sair da Conta</span>
+                <!-- Dropdown de Perfil -->
+                <div class="profile-dropdown-container" id="profile-dropdown-container" style="display: none;">
+                    <!-- Botão gatilho com avatar -->
+                    <button class="profile-trigger-btn" id="profile-trigger-btn" title="Minha Conta">
+                        <img src="" alt="Avatar" class="profile-trigger-avatar" id="profile-trigger-avatar">
                     </button>
+                    
+                    <!-- Card de popover flutuante -->
+                    <div class="profile-popover-card glass-card" id="profile-popover-card">
+                        <div class="popover-user-info">
+                            <img src="" alt="Avatar" class="popover-avatar" id="popover-avatar">
+                            <div class="popover-details">
+                                <span class="popover-name" id="popover-name">Carregando...</span>
+                                <span class="popover-email" id="popover-email"></span>
+                            </div>
+                        </div>
+                        <div class="popover-divider"></div>
+                        <button class="btn btn-secondary text-coral btn-full" id="btn-disconnect-google" title="Sair da Conta">
+                            <i data-lucide="log-out"></i>
+                            <span>Sair da Conta</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </header>
