@@ -1440,8 +1440,7 @@ select option {
     top: calc(100% + 12px);
     right: 0;
     width: 280px;
-    background: rgba(15, 23, 42, 0.97);
-    backdrop-filter: blur(20px);
+    background: #111622;
     border: 1px solid var(--border-color);
     border-radius: 16px;
     box-shadow: var(--shadow-premium);
@@ -1518,6 +1517,15 @@ select option {
         width: 250px;
         padding: 1rem;
         top: calc(100% + 8px);
+    }
+}
+
+@media (min-width: 1750px) {
+    .profile-popover-card {
+        top: 0;
+        left: calc(100% + 60px);
+        right: auto;
+        transform-origin: top left;
     }
 }
 
