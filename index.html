@@ -66,6 +66,10 @@
                     <i data-lucide="plus-circle"></i>
                     <span>Nova Despesa</span>
                 </button>
+                <button class="btn btn-secondary text-coral" id="btn-disconnect-google" title="Sair da Conta">
+                    <i data-lucide="log-out"></i>
+                    <span class="btn-text-responsive">Sair da Conta</span>
+                </button>
             </div>
         </header>
 
@@ -147,28 +151,7 @@
                     </button>
                 </div>
 
-                <!-- Google Drive Sync Status Card -->
-                <div class="glass-card cloud-card">
-                    <h3 class="section-title"><i data-lucide="cloud"></i> Sincronização na Nuvem</h3>
 
-                    <div class="cloud-status-area">
-                        <div class="status-indicator" style="justify-content: space-between; width: 100%;">
-                            <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                <span class="status-dot disconnected" id="cloud-status-dot"></span>
-                                <span class="status-text" id="cloud-status-text">Verificando...</span>
-                            </div>
-                            <span class="cloud-sync-spinner" id="cloud-sync-spinner" style="display: none;">
-                                <i data-lucide="refresh-cw" class="spin-icon"></i>
-                            </span>
-                        </div>
-                    </div>
-
-                    <div class="cloud-actions margin-top-sm" id="cloud-actions-container" style="margin-top: 15px;">
-                        <button class="btn btn-text text-coral btn-full" id="btn-disconnect-google" style="justify-content: center; background: rgba(244, 63, 94, 0.04); padding: 0.6rem;">
-                            <i data-lucide="log-out"></i> Sair da Conta
-                        </button>
-                    </div>
-                </div>
 
                 <!-- Filters Card -->
                 <div class="glass-card filters-card">
