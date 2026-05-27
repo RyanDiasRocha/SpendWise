@@ -159,11 +159,11 @@ function saveState() {
     localStorage.setItem('spendwise_data', JSON.stringify(state));
 }
 
-// Save state locally and sync to Google Drive silently in the background
+// Save state locally and sync to Supabase silently in the background
 function saveAndSync() {
     saveState();
-    if (driveAccessToken) {
-        uploadToDrive(true);
+    if (supabaseClient && supabaseSession) {
+        syncToSupabase();
     }
 }
 
@@ -394,9 +394,17 @@ function updateMetrics(filteredExpenses) {
 // 5. Populate Period Selector
 function renderPeriodSelector() {
     const selector = document.getElementById('filter-period');
+    if (!selector) return;
     selector.innerHTML = '';
 
+    const appContainer = document.getElementById('app-container');
+    const isAppVisible = appContainer && appContainer.style.display !== 'none';
+
     if (state.periods.length === 0) {
+        if (!isAppVisible) {
+            // Do not create a fallback period while the app is hidden/authenticating
+            return;
+        }
         // Fallback safety period if empty
         const fallbackPeriod = { id: generateId(), name: "Meu Período", createdAt: getTodayString() };
         state.periods.push(fallbackPeriod);
@@ -1131,23 +1139,23 @@ async function exportPeriodToExcel() {
     }
 }
 
-// 9.5 Google Drive Integration Logic (OAuth 2.0 & Drive API Client)
-
-let tokenClient = null;
-let driveAccessToken = null;
+// 9.5 Supabase Integration Logic
+let supabaseClient = null;
+let supabaseSession = null;
 let googleUserEmail = "";
 let googleUserName = "";
 let googleUserPhoto = "";
 
-const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
-const SCOPES = 'https://www.googleapis.com/auth/drive.file';
-
 // UI Login Gate Transition Helpers
-function showApp() {
+function showApp(shouldRender = true) {
     const loginScreen = document.getElementById('login-screen');
     const appContainer = document.getElementById('app-container');
     if (loginScreen) loginScreen.style.display = 'none';
     if (appContainer) appContainer.style.display = 'flex';
+    
+    if (shouldRender) {
+        renderList();
+    }
 }
 
 function showLoginGate(showLoader = false, loaderText = 'Autenticando...') {
@@ -1170,34 +1178,42 @@ function showLoginGate(showLoader = false, loaderText = 'Autenticando...') {
     }
 }
 
-async function initGapi() {
+async function initSupabase() {
     try {
-        await gapi.client.init({
-            discoveryDocs: [DISCOVERY_DOC],
-        });
-        console.log("Google API Client (GAPI) inicializado.");
+        const res = await fetch('/api/config');
+        const config = await res.json();
+        if (!config.supabaseUrl || !config.supabaseAnonKey) {
+            console.warn("Chaves do Supabase não configuradas no ambiente.");
+            updateCloudUI();
+            return;
+        }
+        supabaseClient = supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+        console.log("Supabase inicializado.");
+
+        // Check for session on startup
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        supabaseSession = session;
         
-        // Check for cached token on startup
-        const cachedToken = localStorage.getItem('spendwise_gdrive_token');
-        if (cachedToken) {
-            driveAccessToken = cachedToken;
-            gapi.client.setToken({ access_token: driveAccessToken });
+        if (session) {
+            googleUserEmail = session.user.email;
+            googleUserName = session.user.user_metadata.full_name || "";
+            googleUserPhoto = session.user.user_metadata.avatar_url || "";
             
+            localStorage.setItem('spendwise_user_email', googleUserEmail);
+            localStorage.setItem('spendwise_user_name', googleUserName);
+            localStorage.setItem('spendwise_user_photo', googleUserPhoto);
+
             showLoginGate(true, "Carregando dados da nuvem...");
-            
             try {
-                // Validate token by fetching user profile
-                await fetchUserProfile();
-                updateCloudUI();
-                
-                // Try downloading data
-                await downloadFromDrive();
-                showApp();
+                await migrateLocalDataToSupabase();
+                await downloadFromSupabase();
+                showApp(false); // Already rendered in downloadFromSupabase
             } catch (err) {
-                console.warn("Token do Google Drive inválido ou expirado.", err);
-                handleTokenExpiration();
+                console.error("Erro ao sincronizar dados na inicialização:", err);
+                showApp(true); // fallback to local state
             }
         } else {
+            // Check if we were logged in locally
             const email = localStorage.getItem('spendwise_user_email');
             if (email) {
                 showApp();
@@ -1205,95 +1221,322 @@ async function initGapi() {
                 showLoginGate(false);
             }
         }
-    } catch (e) {
-        console.error("Erro ao inicializar GAPI client", e);
-        showLoginGate(false);
+
+        // Listen for auth state changes
+        supabaseClient.auth.onAuthStateChange(async (event, session) => {
+            supabaseSession = session;
+            if (session) {
+                googleUserEmail = session.user.email;
+                googleUserName = session.user.user_metadata.full_name || "";
+                googleUserPhoto = session.user.user_metadata.avatar_url || "";
+                
+                localStorage.setItem('spendwise_user_email', googleUserEmail);
+                localStorage.setItem('spendwise_user_name', googleUserName);
+                localStorage.setItem('spendwise_user_photo', googleUserPhoto);
+
+                updateCloudUI();
+            } else {
+                handleSignOutClear();
+            }
+        });
+    } catch (err) {
+        console.error("Erro ao inicializar Supabase (provavelmente offline):", err);
+        const email = localStorage.getItem('spendwise_user_email');
+        if (email) {
+            showApp();
+        } else {
+            showLoginGate(false);
+        }
+        updateCloudUI();
     }
 }
 
-function initGis() {
-    if (!state.googleClientId) {
-        showToast("Client ID do Google não configurado.", "error");
-        showLoginGate(false);
+async function signInWithGoogle() {
+    if (!supabaseClient) {
+        showToast("Inicializando cliente... Tente novamente em instantes.", "info");
+        return;
+    }
+    const { error } = await supabaseClient.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+            redirectTo: window.location.origin
+        }
+    });
+    if (error) {
+        showToast("Erro ao iniciar login com o Google: " + error.message, "error");
+    }
+}
+
+async function migrateLocalDataToSupabase() {
+    const isMigrated = localStorage.getItem('spendwise_migrated_to_supabase');
+    if (isMigrated === 'true' || !supabaseSession) return;
+
+    // Se o estado local não tiver despesas, não há dados reais para migrar
+    if (state.expenses.length === 0) {
+        localStorage.setItem('spendwise_migrated_to_supabase', 'true');
         return;
     }
 
     try {
-        tokenClient = google.accounts.oauth2.initTokenClient({
-            client_id: state.googleClientId,
-            scope: SCOPES,
-            callback: async (resp) => {
-                if (resp.error !== undefined) {
-                    showToast(`Erro na autenticação: ${resp.error}`, "error");
-                    showLoginGate(false);
-                    throw resp;
-                }
-                driveAccessToken = resp.access_token;
-                localStorage.setItem('spendwise_gdrive_token', driveAccessToken);
-                gapi.client.setToken({ access_token: driveAccessToken });
-                
-                showLoginGate(true, "Sincronizando dados com o Google Drive...");
-                
-                try {
-                    // Fetch profile details
-                    await fetchUserProfile();
-                    updateCloudUI();
-                    
-                    // Download data from Drive
-                    await downloadFromDrive();
-                    showApp();
-                } catch (err) {
-                    console.error("Erro após autenticação:", err);
-                    const email = localStorage.getItem('spendwise_user_email');
-                    if (email) {
-                        handleTokenExpiration();
-                    } else {
-                        disconnectGoogleDrive();
-                    }
-                }
-            },
-        });
-        console.log("Google Identity Services (GIS) inicializado.");
-    } catch (e) {
-        console.error("Erro ao inicializar GIS", e);
-        showLoginGate(false);
-    }
-}
-
-// Start checks for asynchronous script loading
-function startGoogleClients() {
-    // Check GAPI
-    if (typeof gapi !== 'undefined') {
-        gapi.load('client', initGapi);
-    } else {
-        setTimeout(startGoogleClients, 200);
-    }
-
-    // Check GIS
-    if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {
-        initGis();
-    } else {
-        setTimeout(startGoogleClients, 200);
-    }
-}
-
-async function fetchUserProfile() {
-    try {
-        const resp = await gapi.client.drive.about.get({
-            fields: 'user'
-        });
-        const user = resp.result.user;
-        googleUserEmail = user.emailAddress || "Usuário Google";
-        googleUserName = user.displayName || "";
-        googleUserPhoto = user.photoLink || "";
+        const userId = supabaseSession.user.id;
         
-        localStorage.setItem('spendwise_user_email', googleUserEmail);
-        localStorage.setItem('spendwise_user_name', googleUserName);
-        localStorage.setItem('spendwise_user_photo', googleUserPhoto);
-    } catch (e) {
-        console.warn("Não foi possível obter dados do perfil.", e);
-        googleUserEmail = "Conectado";
+        // 1. Migrate payment methods
+        if (state.paymentMethods && state.paymentMethods.length > 0) {
+            const methodsToInsert = state.paymentMethods.map(name => ({ user_id: userId, name: name }));
+            
+            if (methodsToInsert.length > 0) {
+                const { error: pmErr } = await supabaseClient
+                    .from('payment_methods')
+                    .upsert(methodsToInsert, { onConflict: 'user_id,name' });
+                if (pmErr) console.error("Erro ao migrar formas de pagamento:", pmErr);
+            }
+        }
+
+        // 2. Migrate periods
+        if (state.periods && state.periods.length > 0) {
+            const periodsToInsert = state.periods.map(p => ({
+                id: p.id,
+                user_id: userId,
+                name: p.name,
+                created_at: p.createdAt ? new Date(p.createdAt).toISOString() : new Date().toISOString()
+            }));
+
+            const { error: pErr } = await supabaseClient
+                .from('periods')
+                .upsert(periodsToInsert);
+            if (pErr) console.error("Erro ao migrar períodos:", pErr);
+        }
+
+        // 3. Migrate expenses
+        if (state.expenses && state.expenses.length > 0) {
+            const expensesToInsert = state.expenses.map(e => ({
+                id: e.id,
+                user_id: userId,
+                period_id: e.periodId,
+                description: e.description,
+                value: parseFloat(e.value),
+                date: e.date,
+                payment_method: e.paymentMethod,
+                reserved: !!e.reserved,
+                created_at: e.createdAt ? new Date(e.createdAt).toISOString() : new Date().toISOString()
+            }));
+
+            const { error: eErr } = await supabaseClient
+                .from('expenses')
+                .upsert(expensesToInsert);
+            if (eErr) console.error("Erro ao migrar despesas:", eErr);
+        }
+
+        localStorage.setItem('spendwise_migrated_to_supabase', 'true');
+        console.log("Migração de dados locais para o Supabase concluída!");
+    } catch (err) {
+        console.error("Falha na migração automática de dados locais:", err);
     }
+}
+
+async function downloadFromSupabase() {
+    if (!supabaseSession) return;
+
+    try {
+        const userId = supabaseSession.user.id;
+
+        // Fetch periods
+        const { data: dbPeriods, error: pErr } = await supabaseClient
+            .from('periods')
+            .select('*')
+            .order('created_at', { ascending: true });
+        if (pErr) throw pErr;
+
+        // Fetch expenses
+        const { data: dbExpenses, error: eErr } = await supabaseClient
+            .from('expenses')
+            .select('*');
+        if (eErr) throw eErr;
+
+        // Fetch payment methods from Supabase
+        const { data: dbPM, error: pmErr } = await supabaseClient
+            .from('payment_methods')
+            .select('name');
+        if (pmErr) throw pmErr;
+
+        // Reconstruct local state
+        state.periods = dbPeriods.map(p => ({
+            id: p.id,
+            name: p.name,
+            createdAt: p.created_at ? p.created_at.slice(0, 10) : getTodayString()
+        }));
+
+        state.expenses = dbExpenses.map(e => ({
+            id: e.id,
+            periodId: e.period_id,
+            description: e.description,
+            value: parseFloat(e.value),
+            date: e.date,
+            paymentMethod: e.payment_method,
+            reserved: e.reserved
+        }));
+
+        if (dbPM && dbPM.length > 0) {
+            state.paymentMethods = dbPM.map(m => m.name);
+        } else {
+            // New user, populate with default payment methods
+            state.paymentMethods = [...DEFAULT_PAYMENTS];
+            const methodsToInsert = DEFAULT_PAYMENTS.map(name => ({ user_id: userId, name: name }));
+            await supabaseClient.from('payment_methods').insert(methodsToInsert);
+        }
+
+        // Set active period if empty or invalid
+        if (state.periods.length > 0) {
+            if (!state.activePeriodId || !state.periods.some(p => p.id === state.activePeriodId)) {
+                state.activePeriodId = state.periods[0].id;
+            }
+        } else {
+            // Create a default period
+            const defaultPeriodId = "p-" + generateId();
+            const defaultPeriod = { id: defaultPeriodId, name: "Período Inicial", createdAt: getTodayString() };
+            state.periods = [defaultPeriod];
+            state.activePeriodId = defaultPeriodId;
+            
+            // Insert it into Supabase in background
+            await supabaseClient.from('periods').insert({
+                id: defaultPeriodId,
+                user_id: userId,
+                name: defaultPeriod.name,
+                created_at: new Date().toISOString()
+            });
+        }
+
+        saveState();
+        populatePaymentDropdowns();
+        renderList();
+    } catch (e) {
+        console.error("Erro ao carregar dados do Supabase", e);
+        showToast("Erro ao carregar dados da nuvem. Usando versão local.", "warning");
+    }
+}
+
+async function syncToSupabase() {
+    if (!supabaseClient || !supabaseSession) return;
+
+    const userId = supabaseSession.user.id;
+
+    try {
+        // Sync periods
+        const periodsToUpsert = state.periods.map(p => ({
+            id: p.id,
+            user_id: userId,
+            name: p.name
+        }));
+
+        if (periodsToUpsert.length > 0) {
+            await supabaseClient.from('periods').upsert(periodsToUpsert);
+            
+            // Delete periods that no longer exist locally
+            const { data: dbPeriods } = await supabaseClient.from('periods').select('id').eq('user_id', userId);
+            if (dbPeriods) {
+                const localPeriodIds = state.periods.map(p => p.id);
+                const periodsToDelete = dbPeriods.map(p => p.id).filter(id => !localPeriodIds.includes(id));
+                if (periodsToDelete.length > 0) {
+                    await supabaseClient.from('periods').delete().in('id', periodsToDelete);
+                }
+            }
+        } else {
+            await supabaseClient.from('periods').delete().eq('user_id', userId);
+        }
+
+        // Sync expenses
+        const expensesToUpsert = state.expenses.map(e => ({
+            id: e.id,
+            user_id: userId,
+            period_id: e.periodId,
+            description: e.description,
+            value: parseFloat(e.value),
+            date: e.date,
+            payment_method: e.paymentMethod,
+            reserved: !!e.reserved
+        }));
+
+        if (expensesToUpsert.length > 0) {
+            await supabaseClient.from('expenses').upsert(expensesToUpsert);
+
+            // Delete expenses that no longer exist locally
+            const { data: dbExpenses } = await supabaseClient.from('expenses').select('id').eq('user_id', userId);
+            if (dbExpenses) {
+                const localExpenseIds = state.expenses.map(e => e.id);
+                const expensesToDelete = dbExpenses.map(e => e.id).filter(id => !localExpenseIds.includes(id));
+                if (expensesToDelete.length > 0) {
+                    await supabaseClient.from('expenses').delete().in('id', expensesToDelete);
+                }
+            }
+        } else {
+            await supabaseClient.from('expenses').delete().eq('user_id', userId);
+        }
+
+        // Sync all payment methods to Supabase
+        const pmToUpsert = state.paymentMethods.map(name => ({
+            user_id: userId,
+            name: name
+        }));
+
+        if (pmToUpsert.length > 0) {
+            await supabaseClient.from('payment_methods').upsert(pmToUpsert, { onConflict: 'user_id,name' });
+            
+            // Delete methods that no longer exist locally
+            const { data: dbPM } = await supabaseClient.from('payment_methods').select('name').eq('user_id', userId);
+            if (dbPM) {
+                const localMethods = state.paymentMethods;
+                const methodsToDelete = dbPM
+                    .map(m => m.name)
+                    .filter(name => !localMethods.includes(name));
+                
+                if (methodsToDelete.length > 0) {
+                    await supabaseClient.from('payment_methods')
+                        .delete()
+                        .eq('user_id', userId)
+                        .in('name', methodsToDelete);
+                }
+            }
+        } else {
+            await supabaseClient.from('payment_methods').delete().eq('user_id', userId);
+        }
+
+        console.log("Supabase sincronizado.");
+    } catch (e) {
+        console.error("Falha na sincronização com Supabase:", e);
+    }
+}
+
+async function disconnectGoogleDrive() {
+    if (supabaseClient) {
+        try {
+            await supabaseClient.auth.signOut();
+        } catch (e) {
+            console.warn("Falha ao deslogar do Supabase:", e);
+        }
+    }
+    handleSignOutClear();
+    showToast("Desconectado com sucesso.", "info");
+}
+
+function handleSignOutClear() {
+    supabaseSession = null;
+    googleUserEmail = "";
+    googleUserName = "";
+    googleUserPhoto = "";
+    localStorage.removeItem('spendwise_user_email');
+    localStorage.removeItem('spendwise_user_name');
+    localStorage.removeItem('spendwise_user_photo');
+    localStorage.removeItem('spendwise_migrated_to_supabase');
+    
+    // Clear local state to prevent data remaining visible
+    state.periods = [];
+    state.expenses = [];
+    state.activePeriodId = "";
+    state.paymentMethods = [];
+    saveState();
+
+    updateCloudUI();
+    showLoginGate(false);
 }
 
 function updateProfileUI() {
@@ -1302,7 +1545,7 @@ function updateProfileUI() {
     const popoverAvatar = document.getElementById('popover-avatar');
     const popoverName = document.getElementById('popover-name');
     const popoverEmail = document.getElementById('popover-email');
-    const reconnectBtn = document.getElementById('btn-reconnect-google');
+    const syncBtn = document.getElementById('btn-reconnect-google');
 
     const email = localStorage.getItem('spendwise_user_email') || googleUserEmail;
     const name = localStorage.getItem('spendwise_user_name') || googleUserName;
@@ -1317,12 +1560,10 @@ function updateProfileUI() {
             if (popoverName) popoverName.textContent = name || 'Usuário Google';
             if (popoverEmail) popoverEmail.textContent = email;
             
-            if (reconnectBtn) {
-                if (!driveAccessToken) {
-                    reconnectBtn.style.display = 'block';
-                } else {
-                    reconnectBtn.style.display = 'none';
-                }
+            if (syncBtn) {
+                syncBtn.style.display = 'block';
+                const btnText = syncBtn.querySelector('span');
+                if (btnText) btnText.textContent = 'Sincronizar Nuvem';
             }
         } else {
             dropdownContainer.style.display = 'none';
@@ -1340,33 +1581,22 @@ function toggleProfileDropdown(e) {
     }
 }
 
-// Close profile dropdown when clicking outside
-document.addEventListener('click', (e) => {
-    const card = document.getElementById('profile-popover-card');
-    const trigger = document.getElementById('profile-trigger-btn');
-    if (card && card.classList.contains('active')) {
-        if (!card.contains(e.target) && e.target !== trigger && !trigger.contains(e.target)) {
-            card.classList.remove('active');
-        }
-    }
-});
-
 function updateCloudUI() {
     const statusDot = document.getElementById('cloud-status-dot');
     const statusText = document.getElementById('cloud-status-text');
     const actionsContainer = document.getElementById('cloud-actions-container');
 
-    if (!state.googleClientId) {
+    if (!supabaseClient) {
         if (statusDot) statusDot.className = 'status-dot disconnected';
-        if (statusText) statusText.textContent = 'Sem Client ID';
+        if (statusText) statusText.textContent = 'Sem Conexão';
         if (actionsContainer) actionsContainer.style.display = 'none';
         updateProfileUI();
         return;
     }
 
-    if (driveAccessToken) {
+    if (supabaseSession) {
         if (statusDot) statusDot.className = 'status-dot connected';
-        if (statusText) statusText.textContent = googleUserEmail ? `Conectado: ${googleUserEmail}` : 'Sincronizado';
+        if (statusText) statusText.textContent = googleUserEmail ? `Sincronizado: ${googleUserEmail}` : 'Sincronizado';
         if (actionsContainer) actionsContainer.style.display = 'block';
     } else {
         if (statusDot) statusDot.className = 'status-dot disconnected';
@@ -1376,244 +1606,19 @@ function updateCloudUI() {
     updateProfileUI();
 }
 
-// Save/update Client ID in settings
-function saveGoogleClientId() {
-    const inputVal = document.getElementById('cloud-client-id').value.trim();
-    if (!inputVal) {
-        showToast("Insira um Client ID válido para salvar.", "error");
+async function manualSync() {
+    if (!supabaseClient || !supabaseSession) {
+        showToast("Conecte-se para sincronizar com a nuvem.", "warning");
         return;
     }
-
-    state.googleClientId = inputVal;
-    saveState();
-    
-    showToast("Google Client ID salvo! Inicializando conexão...", "success");
-    
-    // Reinitialize GIS client with new ID
-    if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {
-        initGis();
-    } else {
-        startGoogleClients();
-    }
-}
-
-// Trigger login popup
-function connectGoogleDrive() {
-    if (!tokenClient) {
-        showToast("Inicializando cliente... Tente novamente em alguns segundos.", "info");
-        return;
-    }
-    tokenClient.requestAccessToken({ prompt: 'consent' });
-}
-
-// Handle token expiration without logging out the user
-function handleTokenExpiration() {
-    console.warn("Token do Google Drive expirado ou inválido.");
-    driveAccessToken = null;
-    localStorage.removeItem('spendwise_gdrive_token');
-    
-    updateCloudUI();
-    showToast("Sessão do Google Drive expirada. Reconecte no menu de perfil para sincronizar na nuvem.", "warning");
-    showApp();
-}
-
-// Disconnect session
-function disconnectGoogleDrive() {
-    if (driveAccessToken) {
-        try {
-            google.accounts.oauth2.revoke(driveAccessToken, () => {
-                console.log("Token do Google revogado.");
-            });
-        } catch (e) {
-            console.warn("Falha ao revogar token nos servidores do Google:", e);
-        }
-    }
-
-    // Always clear local session details to update UI immediately
-    driveAccessToken = null;
-    googleUserEmail = "";
-    googleUserName = "";
-    googleUserPhoto = "";
-    localStorage.removeItem('spendwise_gdrive_token');
-    localStorage.removeItem('spendwise_user_email');
-    localStorage.removeItem('spendwise_user_name');
-    localStorage.removeItem('spendwise_user_photo');
-    
-    // Clear local state to prevent data remaining visible
-    state.periods = [];
-    state.expenses = [];
-    state.activePeriodId = "";
-    saveState();
-
-    updateCloudUI();
-    showLoginGate(false);
-    showToast("Google Drive desconectado.", "info");
-}
-
-// Search for existing file on Drive
-async function findBackupFile() {
-    const response = await gapi.client.drive.files.list({
-        q: "name = 'spendwise_backup.json' and trashed = false",
-        fields: 'files(id, name)',
-        spaces: 'drive'
-    });
-    const files = response.result.files;
-    return files && files.length > 0 ? files[0].id : null;
-}
-
-// Upload state backup JSON to Drive
-async function uploadToDrive(isSilent = false) {
-    if (!driveAccessToken) {
-        if (!isSilent) {
-            showToast("Conecte sua conta Google primeiro.", "error");
-        }
-        return;
-    }
-
-    const spinner = document.getElementById('cloud-sync-spinner');
-    const statusText = document.getElementById('cloud-status-text');
-    const statusDot = document.getElementById('cloud-status-dot');
-
-    if (spinner) spinner.style.display = 'inline-flex';
-    if (statusText) statusText.textContent = 'Salvando na nuvem...';
-    if (statusDot) statusDot.className = 'status-dot pending-config';
-
-    if (!isSilent) {
-        showToast("Enviando backup para o Google Drive...", "info");
-    }
-
-    let success = false;
+    showToast("Sincronizando dados com o Supabase...", "info");
     try {
-        const fileId = await findBackupFile();
-        const boundary = 'foo_bar_boundary';
-        const delimiter = `\r\n--${boundary}\r\n`;
-        const closeDelimiter = `\r\n--${boundary}--`;
-
-        const metadata = {
-            name: 'spendwise_backup.json',
-            mimeType: 'application/json'
-        };
-        
-        const dataStr = JSON.stringify(state, null, 2);
-
-        let multipartRequestBody = '';
-        let path = '';
-        let method = '';
-
-        if (fileId) {
-            path = `/upload/drive/v3/files/${fileId}`;
-            method = 'PATCH';
-            multipartRequestBody =
-                delimiter +
-                'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-                JSON.stringify(metadata) +
-                delimiter +
-                'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-                dataStr +
-                closeDelimiter;
-        } else {
-            path = '/upload/drive/v3/files';
-            method = 'POST';
-            multipartRequestBody =
-                delimiter +
-                'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-                JSON.stringify(metadata) +
-                delimiter +
-                'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-                dataStr +
-                closeDelimiter;
-        }
-
-        const request = gapi.client.request({
-            'path': path,
-            'method': method,
-            'params': {'uploadType': 'multipart'},
-            'headers': {
-                'Content-Type': 'multipart/related; boundary=' + boundary
-            },
-            'body': multipartRequestBody
-        });
-
-        await request;
-        success = true;
-        if (!isSilent) {
-            showToast("Backup enviado com sucesso para o Drive!", "success");
-        }
+        await syncToSupabase();
+        await downloadFromSupabase();
+        showToast("Sincronização concluída com sucesso!", "success");
     } catch (e) {
-        console.error("Erro no envio para o Drive", e);
-        if (e.status === 401) {
-            handleTokenExpiration();
-        } else {
-            if (!isSilent) {
-                showToast("Erro ao enviar dados para o Google Drive.", "error");
-            }
-        }
-    } finally {
-        if (spinner) spinner.style.display = 'none';
-        if (success) {
-            if (statusDot) statusDot.className = 'status-dot connected';
-            if (statusText) statusText.textContent = googleUserEmail ? `Sincronizado: ${googleUserEmail}` : 'Sincronizado';
-        } else {
-            if (statusDot) statusDot.className = 'status-dot pending-config';
-            if (statusText) statusText.textContent = 'Salvo localmente (Offline)';
-        }
-    }
-}
-
-// Download state backup JSON from Drive
-async function downloadFromDrive() {
-    if (!driveAccessToken) {
-        showToast("Conecte sua conta Google primeiro.", "error");
-        return false;
-    }
-
-    try {
-        const fileId = await findBackupFile();
-        if (!fileId) {
-            showToast("Criando novo arquivo de backup no Google Drive...", "info");
-            initializeDemoData();
-            await uploadToDrive(true);
-            return true;
-        }
-
-        const response = await gapi.client.drive.files.get({
-            fileId: fileId,
-            alt: 'media'
-        });
-
-        let imported = response.result;
-        if (typeof imported === 'string') {
-            try {
-                imported = JSON.parse(imported);
-            } catch (jsonErr) {
-                console.error("Erro ao analisar JSON do backup do Drive", jsonErr);
-            }
-        }
-        
-        if (imported && imported.periods && Array.isArray(imported.periods) && imported.expenses && Array.isArray(imported.expenses)) {
-            const currentClientId = state.googleClientId;
-            state = imported;
-            state.googleClientId = currentClientId;
-
-            saveState();
-            populatePaymentDropdowns();
-            renderList();
-            showToast("Dados sincronizados com o Google Drive!", "success");
-            return true;
-        } else {
-            showToast("Arquivo de backup inválido no Google Drive. Inicializando dados padrão.", "warning");
-            initializeDemoData();
-            await uploadToDrive(true);
-            return true;
-        }
-    } catch (e) {
-        console.error("Erro ao baixar do Drive", e);
-        if (e.status === 401) {
-            handleTokenExpiration();
-        } else {
-            showToast("Erro ao carregar dados do Google Drive.", "error");
-        }
-        throw e;
+        console.error(e);
+        showToast("Erro durante a sincronização manual.", "error");
     }
 }
 
@@ -1690,7 +1695,7 @@ function handleFileInputChange(e) {
                 throw new Error("Formato de arquivo inválido.");
             }
 
-            saveState();
+            saveAndSync();
             populatePaymentDropdowns();
             renderList();
             showToast("Backup importado com sucesso!", "success");
@@ -1711,7 +1716,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (cachedToken) {
         showLoginGate(true, "Carregando dados da nuvem...");
     } else if (email) {
-        showApp();
+        showApp(false); // Do not render inside showApp, we renderList() on DOMContentLoaded
     } else {
         showLoginGate(false);
     }
@@ -1723,8 +1728,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // 2. Initial List rendering (will populate dropdown and charts)
     renderList();
 
-    // Initialize Google API Client Check and status UI
-    startGoogleClients();
+    // Initialize Supabase Client Check and status UI
+    initSupabase();
     updateCloudUI();
 
     // 3. Setup Actions Event Listeners
@@ -1764,15 +1769,24 @@ document.addEventListener("DOMContentLoaded", () => {
         if (e.target.id === 'payment-methods-modal') closePaymentMethodsModal();
     });
 
-    // 4.7 Google Drive Sync Listeners
+    // 4.7 Supabase Sync Listeners
     const btnLoginGoogle = document.getElementById('btn-login-google');
-    if (btnLoginGoogle) btnLoginGoogle.addEventListener('click', connectGoogleDrive);
+    if (btnLoginGoogle) btnLoginGoogle.addEventListener('click', signInWithGoogle);
     
     const btnReconnectGoogle = document.getElementById('btn-reconnect-google');
-    if (btnReconnectGoogle) btnReconnectGoogle.addEventListener('click', connectGoogleDrive);
+    if (btnReconnectGoogle) btnReconnectGoogle.addEventListener('click', manualSync);
     
     const btnDisconnectGoogle = document.getElementById('btn-disconnect-google');
     if (btnDisconnectGoogle) btnDisconnectGoogle.addEventListener('click', disconnectGoogleDrive);
+
+    const btnImportBackup = document.getElementById('btn-import-backup');
+    if (btnImportBackup) btnImportBackup.addEventListener('click', importFullBackup);
+
+    const btnExportBackup = document.getElementById('btn-export-backup');
+    if (btnExportBackup) btnExportBackup.addEventListener('click', exportFullBackup);
+
+    const importFileInput = document.getElementById('import-file-input');
+    if (importFileInput) importFileInput.addEventListener('change', handleFileInputChange);
 
     const profileTriggerBtn = document.getElementById('profile-trigger-btn');
     if (profileTriggerBtn) profileTriggerBtn.addEventListener('click', toggleProfileDropdown);
@@ -1786,8 +1800,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // 7. Auto-sync on reconnection
     window.addEventListener('online', () => {
-        if (driveAccessToken) {
-            uploadToDrive(true);
+        if (supabaseClient && supabaseSession) {
+            syncToSupabase();
         }
     });
 });
