@@ -82,9 +82,17 @@
                             </div>
                         </div>
                         <div class="popover-divider"></div>
-                        <button class="btn btn-secondary btn-full" id="btn-reconnect-google" style="display: none; margin-bottom: 0.5rem;" title="Reconectar Google Drive">
+                        <button class="btn btn-secondary btn-full" id="btn-reconnect-google" style="display: none; margin-bottom: 0.5rem;" title="Sincronizar com a Nuvem">
                             <i data-lucide="refresh-cw"></i>
-                            <span>Reconectar Nuvem</span>
+                            <span>Sincronizar Nuvem</span>
+                        </button>
+                        <button class="btn btn-secondary btn-full" id="btn-import-backup" style="margin-bottom: 0.5rem;" title="Importar Backup JSON">
+                            <i data-lucide="file-input"></i>
+                            <span>Importar Backup</span>
+                        </button>
+                        <button class="btn btn-secondary btn-full" id="btn-export-backup" style="margin-bottom: 0.5rem;" title="Exportar Backup JSON">
+                            <i data-lucide="file-output"></i>
+                            <span>Exportar Backup</span>
                         </button>
                         <button class="btn btn-secondary text-coral btn-full" id="btn-disconnect-google" title="Sair da Conta">
                             <i data-lucide="log-out"></i>
@@ -371,14 +379,14 @@
         </div>
     </div>
 
-    <!-- Google Identity API client and GAPI loading -->
-    <!-- GIS script -->
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <!-- GAPI script -->
-    <script src="https://apis.google.com/js/api.js" async defer></script>
+    <!-- Supabase JS Client Client-side -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
     <!-- Notification Toast -->
     <div class="toast-container" id="toast-container"></div>
+
+    <!-- Hidden File Input for Backup Import -->
+    <input type="file" id="import-file-input" style="display: none;" accept=".json">
 
     <script src="js/app.js"></script>
 </body>
