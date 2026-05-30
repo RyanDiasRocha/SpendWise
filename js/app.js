@@ -1113,6 +1113,66 @@ async function exportPeriodToExcel() {
 
         const lastRowIndex = currentRowIndex - 1;
 
+        // Add Total Row after all data
+        const totalRow = worksheet.getRow(currentRowIndex);
+        totalRow.height = 22;
+
+        const totalLabelCell = totalRow.getCell('C');
+        totalLabelCell.value = 'TOTAL DAS DESPESAS';
+        totalLabelCell.alignment = { horizontal: 'right', vertical: 'middle' };
+
+        const totalValueCell = totalRow.getCell('D');
+        totalValueCell.value = { formula: `SUM(D5:D${lastRowIndex})` };
+        totalValueCell.numFmt = '"R$ "#,##0.00';
+        totalValueCell.alignment = { horizontal: 'right', vertical: 'middle' };
+
+        // Style total row: dark green background with white bold text
+        const totalStyle = {
+            font: { name: 'Segoe UI', size: 11, bold: true, color: { argb: 'FFFFFFFF' } },
+            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2E5E1F' } },
+            alignment: { vertical: 'middle' },
+            border: {
+                top: { style: 'medium', color: { argb: 'FF548C3C' } },
+                left: { style: 'thin', color: { argb: 'FF548C3C' } },
+                bottom: { style: 'thin', color: { argb: 'FF548C3C' } },
+                right: { style: 'thin', color: { argb: 'FF548C3C' } }
+            }
+        };
+
+        ['C', 'D', 'E', 'F', 'G'].forEach(col => {
+            const cell = totalRow.getCell(col);
+            cell.font = totalStyle.font;
+            cell.fill = totalStyle.fill;
+            cell.border = totalStyle.border;
+            if (col !== 'C' && col !== 'D') {
+                cell.value = null;
+            }
+        });
+        totalLabelCell.alignment = { horizontal: 'right', vertical: 'middle' };
+        totalValueCell.alignment = { horizontal: 'right', vertical: 'middle' };
+
+        // Cell I5: soma total das despesas do período
+        worksheet.getColumn('H').width = 20;
+        worksheet.getColumn('I').width = 18;
+
+        const summaryLabelCell = worksheet.getCell('H5');
+        summaryLabelCell.value = 'Total das Despesas:';
+        summaryLabelCell.font = { name: 'Segoe UI', size: 11, bold: true, color: { argb: 'FF548C3C' } };
+        summaryLabelCell.alignment = { horizontal: 'right', vertical: 'middle' };
+
+        const summaryCell = worksheet.getCell('I5');
+        summaryCell.value = { formula: `SUM(D5:D${lastRowIndex})` };
+        summaryCell.numFmt = '"R$ "#,##0.00';
+        summaryCell.font = { name: 'Segoe UI', size: 12, bold: true, color: { argb: 'FF2E5E1F' } };
+        summaryCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        summaryCell.border = {
+            top: { style: 'medium', color: { argb: 'FF548C3C' } },
+            left: { style: 'medium', color: { argb: 'FF548C3C' } },
+            bottom: { style: 'medium', color: { argb: 'FF548C3C' } },
+            right: { style: 'medium', color: { argb: 'FF548C3C' } }
+        };
+        summaryCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E1' } };
+
         // Add Auto Filter exactly like in the user's Excel screenshot
         worksheet.autoFilter = `C4:G${lastRowIndex}`;
 
