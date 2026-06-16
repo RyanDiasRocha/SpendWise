@@ -90,17 +90,19 @@ body {
 
 /* Header styling */
 .app-header {
-    position: relative;
-    z-index: 10;
+    position: sticky;
+    top: 2rem;
+    z-index: 100;
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 1.5rem 2rem;
-    background: var(--bg-card);
+    background: rgba(17, 22, 34, 0.85);
     backdrop-filter: var(--blur-glass);
+    -webkit-backdrop-filter: var(--blur-glass);
     border: 1px solid var(--border-color);
     border-radius: 20px;
-    box-shadow: var(--shadow-premium);
+    box-shadow: var(--shadow-premium), 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
 .logo-area {
