@@ -468,9 +468,15 @@ input:focus, select:focus {
     box-shadow: 0 0 12px var(--color-primary-glow);
 }
 
-select option {
+select option,
+select optgroup {
     background: #111622;
     color: var(--text-main);
+}
+
+select optgroup {
+    font-weight: 600;
+    color: var(--text-muted);
 }
 
 /* Charts Panel */

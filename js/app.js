@@ -412,14 +412,54 @@ function renderPeriodSelector() {
         saveState();
     }
 
+    // Group periods by year
+    const periodsByYear = {};
     state.periods.forEach(p => {
-        const option = document.createElement('option');
-        option.value = p.id;
-        option.textContent = p.name;
-        if (p.id === state.activePeriodId) {
-            option.selected = true;
+        let year = 'Outros';
+        if (p.createdAt && typeof p.createdAt === 'string') {
+            const match = p.createdAt.match(/^(\d{4})/);
+            if (match) {
+                year = match[1];
+            }
         }
-        selector.appendChild(option);
+        if (!periodsByYear[year]) {
+            periodsByYear[year] = [];
+        }
+        periodsByYear[year].push(p);
+    });
+
+    // Sort years descending. Put 'Outros' at the end.
+    const years = Object.keys(periodsByYear).sort((a, b) => {
+        if (a === 'Outros') return 1;
+        if (b === 'Outros') return -1;
+        return b.localeCompare(a);
+    });
+
+    years.forEach(year => {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = year;
+        
+        // Sort periods within this year: newest first (by date descending, then by insertion order descending)
+        const sortedPeriods = [...periodsByYear[year]].sort((a, b) => {
+            const dateA = a.createdAt || '';
+            const dateB = b.createdAt || '';
+            if (dateA !== dateB) {
+                return dateB.localeCompare(dateA);
+            }
+            return state.periods.indexOf(b) - state.periods.indexOf(a);
+        });
+        
+        sortedPeriods.forEach(p => {
+            const option = document.createElement('option');
+            option.value = p.id;
+            option.textContent = p.name;
+            if (p.id === state.activePeriodId) {
+                option.selected = true;
+            }
+            optgroup.appendChild(option);
+        });
+        
+        selector.appendChild(optgroup);
     });
 }
 
